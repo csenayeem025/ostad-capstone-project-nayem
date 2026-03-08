@@ -1,0 +1,28 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: quickhire
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/csenayeem025/ostad-capstone-project-nayem.git
+    targetRevision: HEAD
+    path: applications
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: quickhire
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+    - ApplyOutOfSyncOnly=true
+  ignoreDifferences:
+  - group: apps
+    kind: Deployment
+    jsonPointers:
+    - /spec/replicas

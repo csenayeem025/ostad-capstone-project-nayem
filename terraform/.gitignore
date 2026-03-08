@@ -31,5 +31,3 @@ secrets.tfvars
 **/secrets.tfvars
 *.pem
 *.key
-
-terraform.tfvars

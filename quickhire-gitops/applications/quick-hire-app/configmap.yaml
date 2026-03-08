@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-config
+  namespace: quickhire
+data:
+  NEXT_PUBLIC_API_URL: "http://<MASTER_IP>:30500"
+  NEXT_PUBLIC_APP_NAME: "QuickHire"
