@@ -1,16 +1,26 @@
+terraform {
+  required_version = ">= 1.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
 provider "aws" {
   region = var.aws_region
 }
 
-# Get available AZs in Mumbai region
+# Get available AZs in Singapore region
 data "aws_availability_zones" "available" {
   state = "available"
 }
 
 # Security Group
 resource "aws_security_group" "kubernetes_sg" {
-  name        = "kubernetes-security-group-mumbai"
-  description = "Security group for Kubernetes cluster in Mumbai"
+  name        = "kubernetes-security-group-singapore"
+  description = "Security group for Kubernetes cluster in Singapore"
   vpc_id      = var.vpc_id
 
   # SSH access
@@ -125,9 +135,9 @@ resource "aws_security_group" "kubernetes_sg" {
   }
 
   tags = {
-    Name        = "kubernetes-sg-mumbai"
+    Name        = "kubernetes-sg-singapore"
     Environment = "production"
-    Region      = "Mumbai"
+    Region      = "Singapore"
     ManagedBy   = "Terraform"
   }
 }
@@ -139,13 +149,13 @@ resource "aws_instance" "master" {
   key_name              = var.key_name
   vpc_security_group_ids = [aws_security_group.kubernetes_sg.id]
   subnet_id             = var.subnet_id
-  availability_zone      = data.aws_availability_zones.available.names[0]
+  #availability_zone      = data.aws_availability_zones.available.names[0]
   
   tags = {
-    Name        = "k8s-master-mumbai"
+    Name        = "k8s-master-singapore"
     Role        = "master"
     Environment = "production"
-    Region      = "Mumbai"
+    Region      = "Singapore"
     ManagedBy   = "Terraform"
   }
 
@@ -155,16 +165,16 @@ resource "aws_instance" "master" {
     encrypted   = true
     delete_on_termination = true
     tags = {
-      Name = "k8s-master-root-mumbai"
+      Name = "k8s-master-root-singapore"
     }
   }
 
   user_data = <<-EOF
     #!/bin/bash
-    echo "Master node provisioning in Mumbai region..."
+    echo "Master node provisioning in Singapore region..."
     
-    # Set timezone to IST
-    timedatectl set-timezone Asia/Kolkata
+    # Set timezone to Singapore Time
+    timedatectl set-timezone Asia/Singapore
     
     # Update system
     apt-get update -y
@@ -182,12 +192,18 @@ resource "aws_instance" "master" {
       net-tools \
       tree \
       jq \
-      unzip
+      unzip \
+      apt-transport-https \
+      ca-certificates \
+      gnupg \
+      lsb-release
     
     # Optimize system for Kubernetes control plane
     echo 'vm.max_map_count=262144' >> /etc/sysctl.conf
     echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
     echo 'net.bridge.bridge-nf-call-iptables=1' >> /etc/sysctl.conf
+    echo 'net.ipv4.tcp_tw_reuse=1' >> /etc/sysctl.conf
+    echo 'net.ipv4.tcp_fin_timeout=30' >> /etc/sysctl.conf
     sysctl -p
     
     # Create swap file for additional memory
@@ -201,10 +217,10 @@ resource "aws_instance" "master" {
     echo 'vm.swappiness=10' >> /etc/sysctl.conf
     sysctl -p
     
-    # Install Docker prerequisites
-    apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release
+    # Configure APT to use Singapore mirrors for faster downloads
+    sed -i 's/archive.ubuntu.com/ap-southeast-1.ec2.archive.ubuntu.com/g' /etc/apt/sources.list
     
-    echo "Master node setup complete for Mumbai region"
+    echo "Master node setup complete for Singapore region"
   EOF
 }
 
@@ -215,13 +231,13 @@ resource "aws_instance" "worker_1" {
   key_name              = var.key_name
   vpc_security_group_ids = [aws_security_group.kubernetes_sg.id]
   subnet_id             = var.subnet_id
-  availability_zone      = data.aws_availability_zones.available.names[0]
+  #availability_zone      = data.aws_availability_zones.available.names[0]
   
   tags = {
-    Name        = "k8s-worker-1-mumbai"
+    Name        = "k8s-worker-1-singapore"
     Role        = "worker"
     Environment = "production"
-    Region      = "Mumbai"
+    Region      = "Singapore"
     Workload    = "frontend-primary"
     ManagedBy   = "Terraform"
   }
@@ -232,7 +248,7 @@ resource "aws_instance" "worker_1" {
     encrypted   = true
     delete_on_termination = true
     tags = {
-      Name = "k8s-worker-1-root-mumbai"
+      Name = "k8s-worker-1-root-singapore"
     }
   }
 
@@ -240,24 +256,28 @@ resource "aws_instance" "worker_1" {
   ebs_block_device {
     device_name = "/dev/sdf"
     volume_type = "gp3"
-    volume_size = 20
+    volume_size = var.frontend_cache_volume_size
     encrypted   = true
     delete_on_termination = true
     tags = {
-      Name = "k8s-worker-1-frontend-cache-mumbai"
+      Name = "k8s-worker-1-frontend-cache-singapore"
     }
   }
 
   user_data = <<-EOF
     #!/bin/bash
-    echo "Worker node 1 (Frontend Primary) provisioning in Mumbai region..."
+    echo "Worker node 1 (Frontend Primary) provisioning in Singapore region..."
     
-    # Set timezone to IST
-    timedatectl set-timezone Asia/Kolkata
+    # Set timezone to Singapore Time
+    timedatectl set-timezone Asia/Singapore
     
     # Update system
     apt-get update -y
     apt-get upgrade -y
+    
+    # Configure APT to use Singapore mirrors
+    sed -i 's/archive.ubuntu.com/ap-southeast-1.ec2.archive.ubuntu.com/g' /etc/apt/sources.list
+    apt-get update -y
     
     # Install basic packages
     apt-get install -y \
@@ -272,7 +292,8 @@ resource "aws_instance" "worker_1" {
       apt-transport-https \
       ca-certificates \
       gnupg \
-      lsb-release
+      lsb-release \
+      build-essential
     
     # Format and mount additional volume for frontend cache
     mkfs.ext4 /dev/xvdf
@@ -286,6 +307,10 @@ resource "aws_instance" "worker_1" {
     echo 'fs.inotify.max_queued_events=16384' >> /etc/sysctl.conf
     echo 'net.core.somaxconn=1024' >> /etc/sysctl.conf
     echo 'net.ipv4.tcp_max_syn_backlog=1024' >> /etc/sysctl.conf
+    echo 'net.core.rmem_max=16777216' >> /etc/sysctl.conf
+    echo 'net.core.wmem_max=16777216' >> /etc/sysctl.conf
+    echo 'net.ipv4.tcp_rmem=4096 87380 16777216' >> /etc/sysctl.conf
+    echo 'net.ipv4.tcp_wmem=4096 65536 16777216' >> /etc/sysctl.conf
     sysctl -p
     
     # Create swap file for additional memory
@@ -303,7 +328,11 @@ resource "aws_instance" "worker_1" {
     mkdir -p /var/lib/frontend-cache/nextjs
     chmod 755 /var/lib/frontend-cache/nextjs
     
-    echo "Worker node 1 (Frontend Primary) setup complete for Mumbai region"
+    # Install Node.js 18.x for potential local builds
+    curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+    apt-get install -y nodejs
+    
+    echo "Worker node 1 (Frontend Primary) setup complete for Singapore region"
   EOF
 }
 
@@ -314,13 +343,13 @@ resource "aws_instance" "worker_2" {
   key_name              = var.key_name
   vpc_security_group_ids = [aws_security_group.kubernetes_sg.id]
   subnet_id             = var.subnet_id
-  availability_zone      = data.aws_availability_zones.available.names[1]
+  #availability_zone      = data.aws_availability_zones.available.names[1]
   
   tags = {
-    Name        = "k8s-worker-2-mumbai"
+    Name        = "k8s-worker-2-singapore"
     Role        = "worker"
     Environment = "production"
-    Region      = "Mumbai"
+    Region      = "Singapore"
     Workload    = "backend-mongodb"
     ManagedBy   = "Terraform"
   }
@@ -331,7 +360,7 @@ resource "aws_instance" "worker_2" {
     encrypted   = true
     delete_on_termination = true
     tags = {
-      Name = "k8s-worker-2-root-mumbai"
+      Name = "k8s-worker-2-root-singapore"
     }
   }
 
@@ -339,24 +368,28 @@ resource "aws_instance" "worker_2" {
   ebs_block_device {
     device_name = "/dev/sdf"
     volume_type = "gp3"
-    volume_size = 50
+    volume_size = var.mongodb_volume_size
     encrypted   = true
     delete_on_termination = false  # Keep MongoDB data even if instance terminates
     tags = {
-      Name = "k8s-worker-2-mongodb-data-mumbai"
+      Name = "k8s-worker-2-mongodb-data-singapore"
     }
   }
 
   user_data = <<-EOF
     #!/bin/bash
-    echo "Worker node 2 (Backend + MongoDB) provisioning in Mumbai region..."
+    echo "Worker node 2 (Backend + MongoDB) provisioning in Singapore region..."
     
-    # Set timezone to IST
-    timedatectl set-timezone Asia/Kolkata
+    # Set timezone to Singapore Time
+    timedatectl set-timezone Asia/Singapore
     
     # Update system
     apt-get update -y
     apt-get upgrade -y
+    
+    # Configure APT to use Singapore mirrors
+    sed -i 's/archive.ubuntu.com/ap-southeast-1.ec2.archive.ubuntu.com/g' /etc/apt/sources.list
+    apt-get update -y
     
     # Install basic packages
     apt-get install -y \
@@ -386,6 +419,8 @@ resource "aws_instance" "worker_2" {
     echo 'vm.swappiness=1' >> /etc/sysctl.conf
     echo 'vm.dirty_ratio=15' >> /etc/sysctl.conf
     echo 'vm.dirty_background_ratio=5' >> /etc/sysctl.conf
+    echo 'net.core.somaxconn=4096' >> /etc/sysctl.conf
+    echo 'net.ipv4.tcp_max_syn_backlog=4096' >> /etc/sysctl.conf
     sysctl -p
     
     # Set ulimits for MongoDB
@@ -405,7 +440,13 @@ resource "aws_instance" "worker_2" {
     mkdir -p /data/mongodb
     chmod 755 /data/mongodb
     
-    echo "Worker node 2 (Backend + MongoDB) setup complete for Mumbai region"
+    # Install MongoDB tools
+    wget -qO - https://www.mongodb.org/static/pgp/server-6.0.asc | apt-key add -
+    echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/6.0 multiverse" | tee /etc/apt/sources.list.d/mongodb-org-6.0.list
+    apt-get update -y
+    apt-get install -y mongodb-org-shell mongodb-org-tools
+    
+    echo "Worker node 2 (Backend + MongoDB) setup complete for Singapore region"
   EOF
 }
 
@@ -416,13 +457,13 @@ resource "aws_instance" "worker_3" {
   key_name              = var.key_name
   vpc_security_group_ids = [aws_security_group.kubernetes_sg.id]
   subnet_id             = var.subnet_id
-  availability_zone      = data.aws_availability_zones.available.names[2]
+  #availability_zone      = data.aws_availability_zones.available.names[2]
   
   tags = {
-    Name        = "k8s-worker-3-mumbai"
+    Name        = "k8s-worker-3-singapore"
     Role        = "worker"
     Environment = "production"
-    Region      = "Mumbai"
+    Region      = "Singapore"
     Workload    = "frontend-monitoring"
     ManagedBy   = "Terraform"
   }
@@ -433,7 +474,7 @@ resource "aws_instance" "worker_3" {
     encrypted   = true
     delete_on_termination = true
     tags = {
-      Name = "k8s-worker-3-root-mumbai"
+      Name = "k8s-worker-3-root-singapore"
     }
   }
 
@@ -441,24 +482,28 @@ resource "aws_instance" "worker_3" {
   ebs_block_device {
     device_name = "/dev/sdf"
     volume_type = "gp3"
-    volume_size = 30
+    volume_size = var.monitoring_volume_size
     encrypted   = true
     delete_on_termination = true
     tags = {
-      Name = "k8s-worker-3-monitoring-data-mumbai"
+      Name = "k8s-worker-3-monitoring-data-singapore"
     }
   }
 
   user_data = <<-EOF
     #!/bin/bash
-    echo "Worker node 3 (Frontend Replica + Monitoring) provisioning in Mumbai region..."
+    echo "Worker node 3 (Frontend Replica + Monitoring) provisioning in Singapore region..."
     
-    # Set timezone to IST
-    timedatectl set-timezone Asia/Kolkata
+    # Set timezone to Singapore Time
+    timedatectl set-timezone Asia/Singapore
     
     # Update system
     apt-get update -y
     apt-get upgrade -y
+    
+    # Configure APT to use Singapore mirrors
+    sed -i 's/archive.ubuntu.com/ap-southeast-1.ec2.archive.ubuntu.com/g' /etc/apt/sources.list
+    apt-get update -y
     
     # Install basic packages
     apt-get install -y \
@@ -485,6 +530,8 @@ resource "aws_instance" "worker_3" {
     echo 'fs.inotify.max_user_watches=524288' >> /etc/sysctl.conf
     echo 'fs.inotify.max_user_instances=512' >> /etc/sysctl.conf
     echo 'vm.max_map_count=262144' >> /etc/sysctl.conf
+    echo 'net.core.somaxconn=1024' >> /etc/sysctl.conf
+    echo 'net.ipv4.tcp_max_syn_backlog=1024' >> /etc/sysctl.conf
     sysctl -p
     
     # Create swap file
@@ -506,7 +553,12 @@ resource "aws_instance" "worker_3" {
     mkdir -p /var/lib/frontend-cache-replica/nextjs
     chmod 755 /var/lib/frontend-cache-replica/nextjs
     
-    echo "Worker node 3 (Frontend Replica + Monitoring) setup complete for Mumbai region"
+    # Install monitoring tools
+    curl -fsSL https://apt.grafana.com/gpg.key | gpg --dearmor -o /usr/share/keyrings/grafana.gpg
+    echo "deb [signed-by=/usr/share/keyrings/grafana.gpg] https://apt.grafana.com stable main" | tee /etc/apt/sources.list.d/grafana.list
+    apt-get update -y
+    
+    echo "Worker node 3 (Frontend Replica + Monitoring) setup complete for Singapore region"
   EOF
 }
 
@@ -516,9 +568,9 @@ resource "aws_eip" "master_eip" {
   domain   = "vpc"
   
   tags = {
-    Name        = "k8s-master-eip-mumbai"
+    Name        = "k8s-master-eip-singapore"
     Environment = "production"
-    Region      = "Mumbai"
+    Region      = "Singapore"
   }
 }
 
@@ -565,12 +617,12 @@ output "worker_3_private_ip" {
 
 output "aws_region" {
   value = var.aws_region
-  description = "AWS Region (Mumbai - ap-south-1)"
+  description = "AWS Region (Singapore - ap-southeast-1)"
 }
 
 output "availability_zones" {
   value = data.aws_availability_zones.available.names
-  description = "Available AZs in Mumbai region"
+  description = "Available AZs in Singapore region"
 }
 
 output "security_group_id" {
@@ -635,4 +687,15 @@ output "application_endpoints" {
     loki              = "http://${aws_instance.worker_3.public_ip}:3100"
   }
   description = "Application endpoints"
+}
+
+# Network performance metrics
+output "network_info" {
+  value = {
+    region              = "ap-southeast-1 (Singapore)"
+    region_description  = "Southeast Asia - Singapore"
+    latency_optimized   = "Optimized for Southeast Asian users"
+    available_azs       = data.aws_availability_zones.available.names
+  }
+  description = "Network information for Singapore region"
 }
